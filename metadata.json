@@ -1,0 +1,8 @@
+{
+  "name": "14 Day Testing Club",
+  "description": "Professional Android App Testing Community where developers submit apps, members run tests, send reports, chat in real-time, and vote for temporary moderators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

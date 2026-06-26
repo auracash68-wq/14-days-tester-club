@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account profile details including moderation status",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "contactNumber": { "type": "string" },
+        "bio": { "type": "string" },
+        "role": { "type": "string", "enum": ["member", "leader"] },
+        "muted": { "type": "boolean" },
+        "suspendedUntil": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "displayName", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Global community chat messages",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "userPhotoURL": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "isAnnouncement": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "reportedCount": { "type": "number" }
+      },
+      "required": ["id", "userId", "content", "timestamp"]
+    },
+    "App": {
+      "title": "App",
+      "description": "Testing requests submitted by developers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "appName": { "type": "string" },
+        "appIcon": { "type": "string" },
+        "googleGroupLink": { "type": "string" },
+        "joinWebLink": { "type": "string" },
+        "joinAndroidLink": { "type": "string" },
+        "developerUid": { "type": "string" },
+        "developerEmail": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "appName", "googleGroupLink", "joinWebLink", "joinAndroidLink", "developerUid", "developerEmail", "createdAt"]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Testing feedback and bug reports submitted by testers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "appId": { "type": "string" },
+        "appName": { "type": "string" },
+        "developerUid": { "type": "string" },
+        "testerUid": { "type": "string" },
+        "testerName": { "type": "string" },
+        "testerPhoto": { "type": "string" },
+        "feedback": { "type": "string" },
+        "bugReport": { "type": "string" },
+        "suggestions": { "type": "string" },
+        "screenshots": { "type": "array" },
+        "status": { "type": "string", "enum": ["Pending", "Reviewed", "Resolved"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "appId", "appName", "developerUid", "testerUid", "testerName", "feedback", "status", "createdAt"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "Secure voting records for leader election",
+      "type": "object",
+      "properties": {
+        "voterUid": { "type": "string" },
+        "candidateUid": { "type": "string" },
+        "candidateName": { "type": "string" },
+        "votingRoundId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["voterUid", "candidateUid", "votingRoundId", "createdAt"]
+    },
+    "UserReport": {
+      "title": "UserReport",
+      "description": "Evidence submitted when reporting a community member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reportedUid": { "type": "string" },
+        "reportedName": { "type": "string" },
+        "reporterUid": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "reason": { "type": "string" },
+        "evidenceText": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Reviewed"] }
+      },
+      "required": ["id", "reportedUid", "reporterUid", "reason", "createdAt", "status"]
+    },
+    "ModerationLog": {
+      "title": "ModerationLog",
+      "description": "Audit trail for leader administrative actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "leaderUid": { "type": "string" },
+        "leaderName": { "type": "string" },
+        "targetUid": { "type": "string" },
+        "targetName": { "type": "string" },
+        "actionType": { "type": "string", "enum": ["Mute", "Unmute", "Suspend_24h", "Suspend_7d", "Suspend_14d", "Unsuspend", "Ban", "Delete_Account"] },
+        "reason": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "leaderUid", "actionType", "targetUid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "User profiles collection"
+    },
+    "messages": {
+      "schema": "Message",
+      "description": "Global chat messages"
+    },
+    "apps": {
+      "schema": "App",
+      "description": "Testing requests collection"
+    },
+    "reports": {
+      "schema": "Report",
+      "description": "Testing feedback and reports"
+    },
+    "votes": {
+      "schema": "Vote",
+      "description": "Active vote entries"
+    },
+    "user_reports": {
+      "schema": "UserReport",
+      "description": "Community reported violations"
+    },
+    "moderation_logs": {
+      "schema": "ModerationLog",
+      "description": "Audit trail of leader operations"
+    }
+  }
+}
