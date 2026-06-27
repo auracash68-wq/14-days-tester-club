@@ -107,78 +107,14 @@ const localDb = {
   }
 };
 
-// Seed default users if empty (for beautiful UI preview experience)
+// Seed default users if empty (for beautiful UI preview experience) - KEEP EMPTY FOR PRODUCTION CLEANLINESS
 if (localDb.get('users').length === 0) {
-  localDb.set('users', [
-    {
-      uid: 'leader_mock_id',
-      displayName: 'Alex Rivers (Leader)',
-      email: 'alex.rivers@playtest.org',
-      photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150',
-      role: 'leader',
-      muted: false,
-      suspendedUntil: null,
-      createdAt: new Date().toISOString()
-    },
-    {
-      uid: 'tester_mock_1',
-      displayName: 'Devon Carter',
-      email: 'devon@coder.net',
-      photoURL: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150',
-      role: 'member',
-      muted: false,
-      suspendedUntil: null,
-      createdAt: new Date().toISOString()
-    },
-    {
-      uid: 'tester_mock_2',
-      displayName: 'Sarah Jenkins',
-      email: 'sarah.j@tech.com',
-      photoURL: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150',
-      role: 'member',
-      muted: false,
-      suspendedUntil: null,
-      createdAt: new Date().toISOString()
-    }
-  ]);
+  localDb.set('users', []);
 }
 
 // Seed default apps if empty
 if (localDb.get('apps').length === 0) {
-  localDb.set('apps', [
-    {
-      id: 'app_1',
-      appName: 'HabitHero Launcher',
-      packageName: 'com.habithero.app',
-      playStoreUrl: 'https://play.google.com/store/apps/details?id=com.habithero.app',
-      developerUid: 'tester_mock_1',
-      developerName: 'Devon Carter',
-      status: 'active',
-      description: 'A beautiful, minimalist home screen replacement centered around helping you build lasting habits.',
-      instructions: 'Please test the gesture controls and widget customization on the home page.',
-      category: 'Productivity',
-      testingDurationDays: 14,
-      requiredTesterCount: 20,
-      activeTesterCount: 12,
-      createdAt: new Date().toISOString()
-    },
-    {
-      id: 'app_2',
-      appName: 'FitPulse Tracker',
-      packageName: 'com.fitpulse.sports',
-      playStoreUrl: 'https://play.google.com/store/apps/details?id=com.fitpulse.sports',
-      developerUid: 'tester_mock_2',
-      developerName: 'Sarah Jenkins',
-      status: 'active',
-      description: 'An open-source athletic tracker designed for smartwatches and heart rate monitors.',
-      instructions: 'Enable workout mode and check if Bluetooth sync completes without latency.',
-      category: 'Health & Fitness',
-      testingDurationDays: 14,
-      requiredTesterCount: 20,
-      activeTesterCount: 16,
-      createdAt: new Date().toISOString()
-    }
-  ]);
+  localDb.set('apps', []);
 }
 
 // Seed default messages if empty (disabled to allow purely real user chat)
@@ -202,18 +138,55 @@ function shouldFallback(error: any): boolean {
   const msg = (error.message || String(error)).toLowerCase();
   const code = error.code ? String(error.code).toLowerCase() : '';
   
+  // Only fall back to local storage if it's a permanent security rule restriction or missing DB
+  // DO NOT fall back on transient connection, network, or offline states.
   return (
     msg.includes('permission') ||
     msg.includes('insufficient') ||
-    msg.includes('unavailable') ||
-    msg.includes('offline') ||
-    msg.includes('could not reach cloud firestore backend') ||
-    msg.includes('connection failed') ||
-    msg.includes('unreachable') ||
-    msg.includes('network') ||
-    code === 'unavailable' ||
-    code === 'failed-precondition'
+    code === 'permission-denied'
   );
+}
+
+// Local storage filter utility for queries when using local storage fallback
+function filterLocalItems(collectionName: string, items: any[], queryObj: any): any[] {
+  if (!queryObj || !queryObj._query) return items;
+  
+  const filters = queryObj._query.filters || [];
+  if (filters.length === 0) return items;
+  
+  let filtered = [...items];
+  
+  for (const f of filters) {
+    // Extract field name
+    const field = f.field?.stringField || f.field?.path?.segments?.[0] || f.field?.path || '';
+    if (!field) continue;
+
+    // Extract comparison value
+    let val = f.value?.internalValue;
+    if (val === undefined) {
+      val = f.value?.value?.internalValue;
+    }
+    if (val === undefined) {
+      val = f.value;
+    }
+    if (val === undefined) continue;
+
+    // Extract operator
+    const op = (f.op?.name || f.op || '').toLowerCase();
+    
+    filtered = filtered.filter(item => {
+      const itemValue = item[field];
+      if (op.includes('eq') || op === '==' || op === 'equal') {
+        return itemValue === val;
+      }
+      if (op.includes('not') || op === '!=' || op === 'not_equal') {
+        return itemValue !== val;
+      }
+      return true;
+    });
+  }
+  
+  return filtered;
 }
 
 // Wrapper Functions supporting Transparent Firestore-to-Local Storage Failover
@@ -312,7 +285,8 @@ export async function safeGetDocs(queryOrCol: any): Promise<any> {
   } catch (error: any) {
     if (shouldFallback(error)) {
       console.warn(`Firestore unavailable/denied on getDocs for collection ${collectionName}. Falling back to localStorage.`);
-      const localData = localDb.get(collectionName);
+      let localData = localDb.get(collectionName);
+      localData = filterLocalItems(collectionName, localData, queryOrCol);
       
       return {
         empty: localData.length === 0,
@@ -381,6 +355,7 @@ export function safeOnSnapshot(
     } else {
       // Collection/Query Snapshot
       let items = localDb.get(collectionName);
+      items = filterLocalItems(collectionName, items, queryOrColOrDoc);
       
       // Sort messages by createdAt
       if (collectionName === 'messages') {

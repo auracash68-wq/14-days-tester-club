@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { doc } from 'firebase/firestore';
 import { auth, db, googleProvider } from '../firebase/config';
-import { safeGetDoc, safeSetDoc } from '../firebase/db';
+import { safeGetDoc, safeSetDoc, safeUpdateDoc } from '../firebase/db';
 import { motion } from 'motion/react';
 import { ShieldCheck, AlertTriangle, Cpu } from 'lucide-react';
 import Logo from './Logo';
@@ -26,6 +26,15 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         throw new Error("No user information received from Google Sign-In.");
       }
 
+      // Check if email is in permanent ban blacklist
+      if (user.email) {
+        const bannedEmailRef = doc(db, 'banned_emails', user.email.toLowerCase());
+        const bannedEmailDoc = await safeGetDoc(bannedEmailRef);
+        if (bannedEmailDoc.exists()) {
+          throw new Error("This Google account is permanently banned or deleted from the community by the Administrator.");
+        }
+      }
+
       // Check if user already exists in Firestore
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await safeGetDoc(userDocRef);
@@ -47,8 +56,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       } else {
         const existingData = userDoc.data();
         if (existingData.suspendedUntil && new Date(existingData.suspendedUntil) > new Date()) {
-          // If permanent ban or suspended
-          throw new Error(`Your account is currently suspended until ${new Date(existingData.suspendedUntil).toLocaleString()}.`);
+          if (existingData.email === 'sg7899976@gmail.com' || existingData.role === 'leader') {
+            await safeUpdateDoc(userDocRef, { suspendedUntil: null });
+            existingData.suspendedUntil = null;
+          } else {
+            // If permanent ban or suspended
+            throw new Error(`Your account is currently suspended until ${new Date(existingData.suspendedUntil).toLocaleString()}.`);
+          }
         }
         onLoginSuccess(existingData);
       }

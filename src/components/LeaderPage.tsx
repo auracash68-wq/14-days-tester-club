@@ -6,12 +6,12 @@ import { db } from '../firebase/config';
 import { 
   safeOnSnapshot, safeGetDocs, safeGetDoc, safeSetDoc, safeUpdateDoc, safeDeleteDoc 
 } from '../firebase/db';
-import { User, UserReport, ModerationLog } from '../types';
+import { User, UserReport, ModerationLog, Complaint } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Shield, ShieldAlert, Users, Layers, Flag, 
   Trash2, Ban, VolumeX, Volume2, ShieldCheck, 
-  History, Info, Lock, Unlock, CheckCircle
+  History, Info, Lock, Unlock, CheckCircle, Image as ImageIcon
 } from 'lucide-react';
 
 interface LeaderPageProps {
@@ -25,7 +25,7 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
   const [adminPasswordInput, setAdminPasswordInput] = useState('');
   const [loginError, setLoginError] = useState('');
   
-  const isEmailAdmin = currentUser.email === 'gazisahidhosen76@gmail.com';
+  const isEmailAdmin = currentUser.email === 'gazisahidhosen76@gmail.com' || currentUser.email === 'sg7899976@gmail.com';
   const [isUnlocked, setIsUnlocked] = useState(() => {
     return isEmailAdmin || localStorage.getItem('admin_panel_unlocked') === 'true';
   });
@@ -38,6 +38,138 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
   const [reportedUsersList, setReportedUsersList] = useState<UserReport[]>([]);
   const [reportedCount, setReportedCount] = useState(0);
   const [moderationLogs, setModerationLogs] = useState<ModerationLog[]>([]);
+  const [complaintsList, setComplaintsList] = useState<Complaint[]>([]);
+  
+  // Leader Active Section state
+  const [leaderActiveTab, setLeaderActiveTab] = useState<'moderation' | 'complaints' | 'maintenance'>('moderation');
+  const [adminLightboxImage, setAdminLightboxImage] = useState<string | null>(null);
+
+  // Maintenance states
+  const [purging, setPurging] = useState<string | null>(null);
+
+  const purgeCollection = async (collectionName: string) => {
+    if (!window.confirm(`Are you absolutely sure you want to completely PURGE all data in the "${collectionName}" collection? This is a permanent, irreversible action.`)) {
+      return;
+    }
+
+    setPurging(collectionName);
+    try {
+      const snap = await safeGetDocs(collection(db, collectionName));
+      let count = 0;
+      if (snap && typeof snap.forEach === 'function') {
+        const deletePromises: Promise<void>[] = [];
+        snap.forEach((docSnap: any) => {
+          deletePromises.push(safeDeleteDoc(doc(db, collectionName, docSnap.id)));
+          count++;
+        });
+        await Promise.all(deletePromises);
+      }
+      alert(`Successfully purged ${count} items from ${collectionName}!`);
+    } catch (err) {
+      console.error(err);
+      alert(`Error purging collection: ${err}`);
+    } finally {
+      setPurging(null);
+    }
+  };
+
+  const purgeDemoDataOnly = async () => {
+    if (!window.confirm("Are you sure you want to run Safe Purge? This will remove all standard demo/mock data (like HabitHero, FitPulse, or apps uploaded by 'unknown' users) but leave real user submissions untouched.")) {
+      return;
+    }
+
+    setPurging('demo_data');
+    try {
+      let appsDeleted = 0;
+      let reportsDeleted = 0;
+      let messagesDeleted = 0;
+
+      // Clean apps
+      const appsSnap = await safeGetDocs(collection(db, 'apps'));
+      if (appsSnap && typeof appsSnap.forEach === 'function') {
+        const promises: Promise<void>[] = [];
+        appsSnap.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          const name = (data.appName || '').toLowerCase();
+          const devUid = data.developerUid || '';
+          if (
+            name.includes('habithero') || 
+            name.includes('fitpulse') || 
+            devUid === 'mock-uid' || 
+            devUid === 'unknown' ||
+            name.includes('dummy') ||
+            name.includes('test')
+          ) {
+            promises.push(safeDeleteDoc(doc(db, 'apps', docSnap.id)));
+            appsDeleted++;
+          }
+        });
+        await Promise.all(promises);
+      }
+
+      // Clean reports
+      const reportsSnap = await safeGetDocs(collection(db, 'reports'));
+      if (reportsSnap && typeof reportsSnap.forEach === 'function') {
+        const promises: Promise<void>[] = [];
+        reportsSnap.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          const appName = (data.appName || '').toLowerCase();
+          const testerUid = data.testerUid || '';
+          const devUid = data.developerUid || '';
+          const feedback = (data.feedback || '').toLowerCase();
+          if (
+            appName.includes('habithero') ||
+            appName.includes('fitpulse') ||
+            testerUid === 'mock-uid' ||
+            devUid === 'mock-uid' ||
+            testerUid === 'unknown' ||
+            feedback.includes('dummy') ||
+            feedback.includes('test test') ||
+            feedback.length < 3
+          ) {
+            promises.push(safeDeleteDoc(doc(db, 'reports', docSnap.id)));
+            reportsDeleted++;
+          }
+        });
+        await Promise.all(promises);
+      }
+
+      // Clean chat messages containing demo references or test contents
+      const messagesSnap = await safeGetDocs(collection(db, 'messages'));
+      if (messagesSnap && typeof messagesSnap.forEach === 'function') {
+        const promises: Promise<void>[] = [];
+        messagesSnap.forEach((docSnap: any) => {
+          const data = docSnap.data();
+          const content = (data.content || '').toLowerCase();
+          const displayName = (data.userDisplayName || '').toLowerCase();
+          if (
+            content.includes('habithero') ||
+            content.includes('fitpulse') ||
+            content.includes('welcome to') ||
+            content.includes('joining your') ||
+            content.includes('dummy') ||
+            content.includes('test test') ||
+            content.trim() === 'hi' ||
+            content.trim() === '👋' ||
+            displayName.includes('mock-user') ||
+            !data.timestamp ||
+            data.timestamp === 'Invalid Date'
+          ) {
+            promises.push(safeDeleteDoc(doc(db, 'messages', docSnap.id)));
+            messagesDeleted++;
+          }
+        });
+        await Promise.all(promises);
+      }
+
+      alert(`Safe Purge completed successfully!\n\nDeleted:\n- ${appsDeleted} demo apps\n- ${reportsDeleted} demo reports\n- ${messagesDeleted} test chat messages.`);
+    } catch (err) {
+      console.error(err);
+      alert(`Safe Purge failed: ${err}`);
+    } finally {
+      setPurging(null);
+    }
+  };
 
   // Local input for moderation action
   const [modReason, setModReason] = useState<{ [key: string]: string }>({});
@@ -88,6 +220,15 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
       setReportedCount(reports.filter(r => r.status === 'Pending').length);
     });
 
+    // Subscribe to general user complaints
+    const unsubComplaints = safeOnSnapshot(collection(db, 'complaints'), (snapshot) => {
+      const complaints: Complaint[] = [];
+      snapshot.forEach(docSnap => {
+        complaints.push(docSnap.data() as Complaint);
+      });
+      setComplaintsList(complaints.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+    });
+
     // Subscribe to moderation audit history log
     const unsubLogs = safeOnSnapshot(collection(db, 'moderation_logs'), (snapshot) => {
       const logs: ModerationLog[] = [];
@@ -101,6 +242,7 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
       unsubUsers();
       unsubApps();
       unsubReports();
+      unsubComplaints();
       unsubLogs();
     };
   }, [isUnlocked]);
@@ -234,6 +376,16 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
         suspendedUntil: suspensionEnd.toISOString()
       });
 
+      // Write to permanent ban email blacklist
+      if (targetUser.email) {
+        await safeSetDoc(doc(db, 'banned_emails', targetUser.email.toLowerCase()), {
+          email: targetUser.email.toLowerCase(),
+          bannedAt: new Date().toISOString(),
+          reason: reason,
+          targetUid: targetUser.uid
+        });
+      }
+
       // Log moderation action
       const logId = `modlog_${Date.now()}`;
       await safeSetDoc(doc(db, 'moderation_logs', logId), {
@@ -263,6 +415,11 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
         muted: false
       });
 
+      // Remove from permanent blacklist if they were there
+      if (targetUser.email) {
+        await safeDeleteDoc(doc(db, 'banned_emails', targetUser.email.toLowerCase()));
+      }
+
       const logId = `modlog_${Date.now()}`;
       await safeSetDoc(doc(db, 'moderation_logs', logId), {
         id: logId,
@@ -291,6 +448,16 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
     }
 
     try {
+      // Add email to blacklist before deletion so they can't sign up again
+      if (targetUser.email) {
+        await safeSetDoc(doc(db, 'banned_emails', targetUser.email.toLowerCase()), {
+          email: targetUser.email.toLowerCase(),
+          bannedAt: new Date().toISOString(),
+          reason: reason + " (Account Deleted)",
+          targetUid: targetUser.uid
+        });
+      }
+
       await safeDeleteDoc(doc(db, 'users', targetUser.uid));
 
       // Log moderation action
@@ -326,6 +493,22 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
     } catch (err) {
       console.error(err);
       alert("Error processing report action.");
+    }
+  };
+
+  // Action General Complaints
+  const handleActionComplaint = async (complaintId: string, action: 'Reviewed' | 'Resolved' | 'Deleted') => {
+    try {
+      if (action === 'Deleted') {
+        await safeDeleteDoc(doc(db, 'complaints', complaintId));
+        alert("Complaint has been permanently deleted.");
+      } else {
+        await safeUpdateDoc(doc(db, 'complaints', complaintId), { status: action });
+        alert(`Complaint status updated to ${action}.`);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error processing complaint action.");
     }
   };
 
@@ -485,14 +668,53 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
               </div>
             </div>
 
+            {/* Leader Tab Switcher */}
+            <div className="flex flex-wrap gap-2.5 border-b border-slate-800 pb-2" id="leader_tabs">
+              <button
+                onClick={() => setLeaderActiveTab('moderation')}
+                className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${
+                  leaderActiveTab === 'moderation'
+                    ? 'bg-blue-600/15 text-blue-400 border border-blue-500/35 shadow-lg shadow-blue-500/5'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Shield className="h-4 w-4" />
+                <span>Member Moderation</span>
+              </button>
+              <button
+                onClick={() => setLeaderActiveTab('complaints')}
+                className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${
+                  leaderActiveTab === 'complaints'
+                    ? 'bg-rose-600/15 text-rose-400 border border-rose-500/35 shadow-lg shadow-rose-500/5'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <ShieldAlert className="h-4 w-4" />
+                <span>Check Complaints ({complaintsList.filter(c => c.status === 'Pending').length})</span>
+              </button>
+              <button
+                onClick={() => setLeaderActiveTab('maintenance')}
+                className={`px-4 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center gap-2 ${
+                  leaderActiveTab === 'maintenance'
+                    ? 'bg-amber-600/15 text-amber-400 border border-amber-500/35 shadow-lg shadow-amber-500/5'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Layers className="h-4 w-4" />
+                <span>Database Clean-up & Maintenance</span>
+              </button>
+            </div>
+
             {/* Main Interactive Moderation Workspace */}
             <div className="grid gap-8 lg:grid-cols-3" id="admin_main_controls">
               
               {/* Columns left-mid: Moderation Directory and Active Incidents */}
               <div className="lg:col-span-2 space-y-8">
                 
-                {/* 1. Violation Center: Active Incidents list */}
-                <div className="rounded-2xl border border-slate-700/50 bg-[#1E293B] p-6 shadow-xl text-left">
+                {leaderActiveTab === 'moderation' && (
+                  <>
+                    {/* 1. Violation Center: Active Incidents list */}
+                    <div className="rounded-2xl border border-slate-700/50 bg-[#1E293B] p-6 shadow-xl text-left">
                   <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-1.5 border-b border-slate-800 pb-3">
                     <Flag className="h-5 w-5 text-red-500" />
                     Incident Queue (User Reports)
@@ -709,6 +931,226 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
                     )}
                   </div>
                 </div>
+                  </>
+                )}
+
+                {leaderActiveTab === 'complaints' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                    id="complaints_queue"
+                  >
+                    <div className="rounded-2xl border border-slate-700/50 bg-[#1E293B] p-6 shadow-xl text-left">
+                      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-1.5 border-b border-slate-800 pb-3">
+                        <ShieldAlert className="h-5 w-5 text-rose-500" />
+                        <span>Check Complaints (চেক কমপ্লেন)</span>
+                      </h3>
+
+                      {complaintsList.length === 0 ? (
+                        <div className="text-center py-12 text-xs text-slate-500 italic">
+                          No user complaints have been filed in the system yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-5" id="complaints_list_viewport">
+                          {complaintsList.map((comp) => (
+                            <div key={comp.id} className="p-5 rounded-2xl border border-slate-850 bg-slate-900/60 space-y-4 text-xs leading-relaxed">
+                              {/* Header info */}
+                              <div className="flex flex-wrap justify-between items-center gap-2">
+                                <div className="space-y-0.5">
+                                  <span className="font-extrabold text-white text-sm">Target User: {comp.targetUser}</span>
+                                  <p className="text-[10px] text-slate-500 font-mono">Complaint ID: {comp.id}</p>
+                                </div>
+                                <span className={`px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                                  comp.status === 'Resolved' ? 'bg-[#22C55E]/10 text-[#22C55E]' :
+                                  comp.status === 'Reviewed' ? 'bg-[#F59E0B]/10 text-[#F59E0B]' :
+                                  'bg-red-500/10 text-red-400'
+                                }`}>
+                                  {comp.status}
+                                </span>
+                              </div>
+
+                              {/* Details */}
+                              <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-850/60">
+                                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Complaint Details:</span>
+                                <p className="text-slate-200 text-xs sm:text-sm mt-1.5 leading-relaxed whitespace-pre-wrap">{comp.complaintText}</p>
+                              </div>
+
+                              {/* Screenshots */}
+                              {comp.screenshots && comp.screenshots.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider flex items-center gap-1">
+                                    <ImageIcon className="h-3 w-3" /> Attached Evidence ({comp.screenshots.length}):
+                                  </span>
+                                  <div className="flex gap-2 flex-wrap">
+                                    {comp.screenshots.map((src, idx) => (
+                                      <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => setAdminLightboxImage(src)}
+                                        className="relative group overflow-hidden rounded-lg border border-slate-800 hover:border-blue-500 transition-colors focus:outline-none"
+                                      >
+                                        <img src={src} alt="complaint evidence" className="h-14 w-20 object-cover" />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[8px] text-white font-bold transition-opacity">Zoom</div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Reporter info & Action buttons footer */}
+                              <div className="flex flex-wrap justify-between items-center pt-3 border-t border-slate-800/80 gap-3">
+                                <div className="text-[10px] text-slate-500 font-mono">
+                                  <span>Filed by: </span>
+                                  <span className="text-slate-300 font-bold">{comp.reporterName}</span>
+                                  <span> ({comp.reporterEmail}) • {new Date(comp.createdAt).toLocaleDateString()}</span>
+                                </div>
+
+                                <div className="flex gap-2">
+                                  {comp.status !== 'Reviewed' && comp.status !== 'Resolved' && (
+                                    <button
+                                      onClick={() => handleActionComplaint(comp.id, 'Reviewed')}
+                                      className="px-3 py-1.5 bg-slate-850 hover:bg-slate-700 text-slate-200 rounded-lg font-bold hover:text-white transition-all text-[10px]"
+                                    >
+                                      Mark Reviewed
+                                    </button>
+                                  )}
+                                  {comp.status !== 'Resolved' && (
+                                    <button
+                                      onClick={() => handleActionComplaint(comp.id, 'Resolved')}
+                                      className="px-3 py-1.5 bg-[#22C55E]/10 hover:bg-[#22C55E] text-[#22C55E] hover:text-white rounded-lg font-bold transition-all text-[10px]"
+                                    >
+                                      Resolve
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleActionComplaint(comp.id, 'Deleted')}
+                                    className="px-3 py-1.5 bg-red-900/10 hover:bg-red-600 text-red-500 hover:text-white rounded-lg font-bold transition-all text-[10px]"
+                                  >
+                                    Delete Record
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {leaderActiveTab === 'maintenance' && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="space-y-6"
+                    id="database_maintenance_section"
+                  >
+                    <div className="rounded-2xl border border-slate-700/50 bg-[#1E293B] p-6 shadow-xl text-left">
+                      <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-1.5 border-b border-slate-800 pb-3">
+                        <Layers className="h-5 w-5 text-amber-500" />
+                        <span>Database Clean-up & Maintenance (ডাটাবেস ক্লিন-আপ)</span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+                        Use these professional administration actions to purge test data, clean up demo apps and mock feedback reports, or completely refresh the database to make it 100% clean and ready for real testing/production users.
+                      </p>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {/* Action 1: Safe Purge Demo Data */}
+                        <div className="p-5 rounded-2xl border border-amber-500/20 bg-amber-500/5 space-y-3.5">
+                          <div className="flex items-start gap-2.5">
+                            <div className="h-8 w-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-400 shrink-0">
+                              <ShieldCheck className="h-4 w-4" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <h4 className="font-bold text-white text-xs sm:text-sm">Safe Purge Demo Data</h4>
+                              <p className="text-[10px] text-amber-300">শুধুমাত্র ডেমো ডাটা সাফ করুন</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-normal">
+                            Removes standard dummy test entries (e.g. apps like HabitHero, FitPulse, or empty reviews/gibberish reports) while fully preserving real user accounts and actual active submissions.
+                          </p>
+                          <button
+                            onClick={purgeDemoDataOnly}
+                            disabled={purging !== null}
+                            className="w-full py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-900/10 disabled:opacity-50 animate-pulse hover:animate-none"
+                          >
+                            {purging === 'demo_data' ? 'Purging Demo Data...' : 'Run Safe Purge'}
+                          </button>
+                        </div>
+
+                        {/* Action 2: Purge All Reports/Feedbacks */}
+                        <div className="p-5 rounded-2xl border border-rose-500/20 bg-rose-500/5 space-y-3.5">
+                          <div className="flex items-start gap-2.5">
+                            <div className="h-8 w-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-400 shrink-0">
+                              <Flag className="h-4 w-4" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <h4 className="font-bold text-white text-xs sm:text-sm">Purge All Feedback & Reviews</h4>
+                              <p className="text-[10px] text-rose-300">সব ফিডব্যাক রিপোর্ট মুছে ফেলুন</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-normal">
+                            Permanently deletes all submitted tester feedback reviews and reports from the database. This gives you a clean slate for new reviews.
+                          </p>
+                          <button
+                            onClick={() => purgeCollection('reports')}
+                            disabled={purging !== null}
+                            className="w-full py-2 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-rose-900/10 disabled:opacity-50"
+                          >
+                            {purging === 'reports' ? 'Purging Feedback...' : 'Delete All Feedback Reports'}
+                          </button>
+                        </div>
+
+                        {/* Action 3: Purge All App Submissions */}
+                        <div className="p-5 rounded-2xl border border-red-500/20 bg-red-500/5 space-y-3.5">
+                          <div className="flex items-start gap-2.5">
+                            <div className="h-8 w-8 rounded-lg bg-red-500/10 flex items-center justify-center text-red-400 shrink-0">
+                              <Layers className="h-4 w-4" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <h4 className="font-bold text-white text-xs sm:text-sm">Purge All Apps</h4>
+                              <p className="text-[10px] text-red-300">সব অ্যাপ মুছে ফেলুন</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-normal">
+                            Permanently deletes all submitted developer applications from the testing club database. Excellent for clearing the catalog.
+                          </p>
+                          <button
+                            onClick={() => purgeCollection('apps')}
+                            disabled={purging !== null}
+                            className="w-full py-2 bg-red-600 hover:bg-red-500 disabled:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-red-900/10 disabled:opacity-50"
+                          >
+                            {purging === 'apps' ? 'Purging Apps...' : 'Delete All Apps'}
+                          </button>
+                        </div>
+
+                        {/* Action 4: Purge All Chat History */}
+                        <div className="p-5 rounded-2xl border border-blue-500/20 bg-blue-500/5 space-y-3.5">
+                          <div className="flex items-start gap-2.5">
+                            <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
+                              <ShieldAlert className="h-4 w-4" />
+                            </div>
+                            <div className="space-y-0.5">
+                              <h4 className="font-bold text-white text-xs sm:text-sm">Purge Chat History</h4>
+                              <p className="text-[10px] text-blue-300">চ্যাট ইতিহাস মুছে ফেলুন</p>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-slate-300 leading-normal">
+                            Permanently deletes all standard community chat message logs. Keeps user communications fresh and limits storage overhead.
+                          </p>
+                          <button
+                            onClick={() => purgeCollection('messages')}
+                            disabled={purging !== null}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-blue-900/10 disabled:opacity-50"
+                          >
+                            {purging === 'messages' ? 'Purging Chat...' : 'Delete Chat Messages'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
 
               </div>
 
@@ -761,6 +1203,29 @@ export default function LeaderPage({ currentUser, onRefreshUser }: LeaderPagePro
             </div>
 
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Admin Complaint Lightbox Zoom Modal */}
+      <AnimatePresence>
+        {adminLightboxImage && (
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fadeIn"
+            onClick={() => setAdminLightboxImage(null)}
+          >
+            <div 
+              className="relative max-w-4xl max-h-[85vh] overflow-hidden rounded-2xl border border-slate-800 bg-[#1E293B] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <img src={adminLightboxImage} alt="Complaint Evidence Zoom" className="max-w-full max-h-[80vh] object-contain rounded-xl" />
+              <button 
+                onClick={() => setAdminLightboxImage(null)} 
+                className="absolute top-3.5 right-3.5 bg-black/60 text-slate-300 hover:text-white font-bold h-8 w-8 rounded-full flex items-center justify-center hover:bg-black transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
         )}
       </AnimatePresence>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, collection, query, where, limit } from 'firebase/firestore';
 import { auth, db } from './firebase/config';
-import { safeOnSnapshot } from './firebase/db';
+import { safeOnSnapshot, safeUpdateDoc, safeGetDocs, safeDeleteDoc } from './firebase/db';
 import { User } from './types';
 import Login from './components/Login';
 import Navbar from './components/Navbar';
@@ -39,7 +39,15 @@ export default function App() {
     const unsubscribeProfile = safeOnSnapshot(userRef, (docSnap) => {
       if (docSnap.exists()) {
         const profileData = docSnap.data() as User;
+        if (profileData.suspendedUntil && new Date(profileData.suspendedUntil) > new Date()) {
+          if (profileData.email === 'sg7899976@gmail.com' || profileData.role === 'leader') {
+            safeUpdateDoc(userRef, { suspendedUntil: null });
+            profileData.suspendedUntil = undefined;
+          }
+        }
         setCurrentUser(profileData);
+      } else {
+        handleForceLogout();
       }
       setLoading(false);
     }, (error) => {
@@ -70,6 +78,117 @@ export default function App() {
     });
 
     return () => unsubscribeLeader();
+  }, [currentUser]);
+
+  // Automated smart clean-up for data older than 3 months
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const performOldDataCleanup = async () => {
+      const lastCleanup = localStorage.getItem('last_db_cleanup_time');
+      const now = Date.now();
+      
+      // Run cleanup only once every 24 hours to keep overhead negligible
+      if (lastCleanup && now - parseInt(lastCleanup, 10) < 24 * 60 * 60 * 1000) {
+        return;
+      }
+
+      try {
+        const cutoffDate = new Date();
+        cutoffDate.setMonth(cutoffDate.getMonth() - 3); // 3 months ago
+
+        // 1. Clean up old messages (chats)
+        const messagesSnap = await safeGetDocs(collection(db, 'messages'));
+        if (messagesSnap && typeof messagesSnap.forEach === 'function') {
+          messagesSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.timestamp) {
+              const msgDate = new Date(data.timestamp);
+              if (msgDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'messages', docSnap.id));
+              }
+            }
+          });
+        }
+
+        // 2. Clean up old testing reports
+        const reportsSnap = await safeGetDocs(collection(db, 'reports'));
+        if (reportsSnap && typeof reportsSnap.forEach === 'function') {
+          reportsSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.createdAt) {
+              const repDate = new Date(data.createdAt);
+              if (repDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'reports', docSnap.id));
+              }
+            }
+          });
+        }
+
+        // 3. Clean up old user_reports (moderation)
+        const userReportsSnap = await safeGetDocs(collection(db, 'user_reports'));
+        if (userReportsSnap && typeof userReportsSnap.forEach === 'function') {
+          userReportsSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.createdAt) {
+              const urepDate = new Date(data.createdAt);
+              if (urepDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'user_reports', docSnap.id));
+              }
+            }
+          });
+        }
+
+        // 4. Clean up old complaints
+        const complaintsSnap = await safeGetDocs(collection(db, 'complaints'));
+        if (complaintsSnap && typeof complaintsSnap.forEach === 'function') {
+          complaintsSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.createdAt) {
+              const compDate = new Date(data.createdAt);
+              if (compDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'complaints', docSnap.id));
+              }
+            }
+          });
+        }
+
+        // 5. Clean up old moderation logs
+        const logsSnap = await safeGetDocs(collection(db, 'moderation_logs'));
+        if (logsSnap && typeof logsSnap.forEach === 'function') {
+          logsSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.createdAt) {
+              const logDate = new Date(data.createdAt);
+              if (logDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'moderation_logs', docSnap.id));
+              }
+            }
+          });
+        }
+
+        // 6. Clean up old apps
+        const appsSnap = await safeGetDocs(collection(db, 'apps'));
+        if (appsSnap && typeof appsSnap.forEach === 'function') {
+          appsSnap.forEach(async (docSnap: any) => {
+            const data = docSnap.data();
+            if (data && data.createdAt) {
+              const appDate = new Date(data.createdAt);
+              if (appDate < cutoffDate) {
+                await safeDeleteDoc(doc(db, 'apps', docSnap.id));
+              }
+            }
+          });
+        }
+
+        localStorage.setItem('last_db_cleanup_time', now.toString());
+        console.log('Automated 3-month database cleanup completed successfully.');
+      } catch (err) {
+        console.error('Error in performOldDataCleanup: ', err);
+      }
+    };
+
+    performOldDataCleanup();
   }, [currentUser]);
 
   const handleRefreshUser = () => {

@@ -8,6 +8,7 @@ import {
 } from '../firebase/db';
 import { Message, User } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ImageLightbox from './ImageLightbox';
 import { 
   Send, Trash2, ShieldAlert, Pin, UserCheck, 
   UserMinus, Info, AlertOctagon, ThumbsUp, Heart, Smile, CheckCircle, ShieldAlert as ReportIcon, Phone, Mail, Award, X,
@@ -32,6 +33,7 @@ export default function Chat({ currentUser, onRefreshUser }: ChatProps) {
 
   const [chatImage, setChatImage] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   const handleChatImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -43,8 +45,8 @@ export default function Chat({ currentUser, onRefreshUser }: ChatProps) {
       const img = new window.Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 450;
-        const MAX_HEIGHT = 450;
+        const MAX_WIDTH = 2000; // Large width to preserve vertical phone screenshot clarity (around 1080px wide)
+        const MAX_HEIGHT = 2800; // Large height to avoid extreme downscaling
         let width = img.width;
         let height = img.height;
 
@@ -65,7 +67,8 @@ export default function Chat({ currentUser, onRefreshUser }: ChatProps) {
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
 
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        // Compress with high quality (0.93) so that images and texts are crystal clear and highly legible when zoomed!
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.93);
         setChatImage(dataUrl);
         setUploadingImage(false);
       };
@@ -442,14 +445,18 @@ export default function Chat({ currentUser, onRefreshUser }: ChatProps) {
                   {/* Body Content */}
                   {msg.content && <p className="text-sm leading-relaxed break-words">{msg.content}</p>}
                   {msg.imageUrl && (
-                    <div className="mt-2 rounded-lg overflow-hidden border border-slate-700 bg-slate-900/40">
+                    <button 
+                      type="button"
+                      onClick={() => setLightboxImage(msg.imageUrl)}
+                      className="mt-2 rounded-lg overflow-hidden border border-slate-700 bg-slate-900/40 hover:brightness-110 transition-all block focus:outline-none cursor-zoom-in"
+                    >
                       <img 
                         src={msg.imageUrl} 
                         alt="Shared upload" 
                         className="max-h-60 max-w-full object-contain mx-auto rounded"
                         referrerPolicy="no-referrer"
                       />
-                    </div>
+                    </button>
                   )}
 
                   {/* Action Bars for Messages */}
@@ -779,6 +786,16 @@ export default function Chat({ currentUser, onRefreshUser }: ChatProps) {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {lightboxImage && (
+          <ImageLightbox 
+            src={lightboxImage} 
+            alt="Shared Photo Zoom" 
+            onClose={() => setLightboxImage(null)} 
+          />
         )}
       </AnimatePresence>
 

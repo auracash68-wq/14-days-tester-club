@@ -118,6 +118,23 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "leaderUid", "actionType", "targetUid", "createdAt"]
+    },
+    "Complaint": {
+      "title": "Complaint",
+      "description": "General user complaints filed about community members or issues",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reporterUid": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "reporterEmail": { "type": "string" },
+        "targetUser": { "type": "string" },
+        "complaintText": { "type": "string" },
+        "screenshots": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Reviewed", "Resolved"] }
+      },
+      "required": ["id", "reporterUid", "targetUser", "complaintText", "createdAt", "status"]
     }
   },
   "firestore": {
@@ -148,6 +165,10 @@
     "moderation_logs": {
       "schema": "ModerationLog",
       "description": "Audit trail of leader operations"
+    },
+    "complaints": {
+      "schema": "Complaint",
+      "description": "General user complaints"
     }
   }
 }

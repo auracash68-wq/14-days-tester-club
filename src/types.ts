@@ -96,3 +96,16 @@ export interface VotingRound {
   active: boolean;
   winnerUid?: string;
 }
+
+export interface Complaint {
+  id: string;
+  reporterUid: string;
+  reporterName: string;
+  reporterEmail: string;
+  targetUser: string;
+  complaintText: string;
+  screenshots: string[];
+  createdAt: string;
+  status: 'Pending' | 'Reviewed' | 'Resolved';
+}
+

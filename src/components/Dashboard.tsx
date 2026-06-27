@@ -4,14 +4,15 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { 
-  safeOnSnapshot, safeAddDoc, safeUpdateDoc, safeSetDoc 
+  safeOnSnapshot, safeAddDoc, safeUpdateDoc, safeSetDoc, safeDeleteDoc 
 } from '../firebase/db';
 import { App, Report, User } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
+import ImageLightbox from './ImageLightbox';
 import { 
   User as UserIcon, PlusCircle, Inbox, MessageSquareCode, 
   Upload, Copy, Check, Save, ExternalLink, Calendar, ChevronDown, 
-  ChevronUp, Bug, Lightbulb, Image, Send, CheckCircle2, ShieldAlert, Pencil
+  ChevronUp, Bug, Lightbulb, Image, Send, CheckCircle2, ShieldAlert, Pencil, Trash2
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -20,7 +21,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps) {
-  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'requests' | 'receive' | 'reviews'>('profile');
+  const [activeSubTab, setActiveSubTab] = useState<'profile' | 'requests' | 'receive' | 'daily_check' | 'reviews' | 'report_user'>('profile');
   
   // Profile state
   const [displayName, setDisplayName] = useState(currentUser.displayName);
@@ -30,6 +31,7 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
   const [profileSuccess, setProfileSuccess] = useState(false);
   const [copiedId, setCopiedId] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(() => !currentUser.displayName && !currentUser.contactNumber && !currentUser.bio);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
   // Testing Requests form state
   const [appName, setAppName] = useState('');
@@ -44,7 +46,7 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
   const [otherApps, setOtherApps] = useState<App[]>([]);
   const [expandedAppId, setExpandedAppId] = useState<string | null>(null);
 
-  // Report Submission Form state
+  // Report Submission Form state (Tester feedback)
   const [submittingReport, setSubmittingReport] = useState(false);
   const [selectedAppForReport, setSelectedAppForReport] = useState<App | null>(null);
   const [reportFeedback, setReportFeedback] = useState('');
@@ -52,8 +54,19 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
   const [reportSuggestion, setReportSuggestion] = useState('');
   const [reportScreenshots, setReportScreenshots] = useState<string[]>([]);
 
+  // Subscribed app ids where the current user submitted a report
+  const [submittedReportAppIds, setSubmittedReportAppIds] = useState<Set<string>>(new Set());
+
+  // General user Complaint Form state (Report user)
+  const [reportTargetUser, setReportTargetUser] = useState('');
+  const [complaintText, setComplaintText] = useState('');
+  const [complaintScreenshots, setComplaintScreenshots] = useState<string[]>([]);
+  const [submittingComplaint, setSubmittingComplaint] = useState(false);
+  const [complaintSuccess, setComplaintSuccess] = useState(false);
+
   // Developer Reviews (My apps) state
   const [receivedReports, setReceivedReports] = useState<Report[]>([]);
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
 
   // Copy User ID Helper
   const copyToClipboard = (text: string) => {
@@ -114,8 +127,8 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
         const img = new window.Image();
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 400; // slightly wider for details
-          const MAX_HEIGHT = 400;
+          const MAX_WIDTH = 2000; // Large width to preserve vertical phone screenshot clarity (around 1080px wide)
+          const MAX_HEIGHT = 2800; // Large height to avoid extreme downscaling
           let width = img.width;
           let height = img.height;
 
@@ -136,7 +149,8 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
 
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+          // Set high quality (0.93) so that screenshots containing small text are crystal clear and highly readable when zoomed!
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.93);
           setReportScreenshots((prev) => [...prev, dataUrl].slice(0, 3)); // Limit to max 3 screenshots
         };
         img.src = event.target?.result as string;
@@ -172,37 +186,145 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
     return () => unsubscribe();
   }, [currentUser.uid]);
 
-  // Fetch reviews received for my apps
+  // Fetch reviews received (filtered for developer or all if admin)
   useEffect(() => {
-    const q = query(
-      collection(db, 'reports'),
-      where('developerUid', '==', currentUser.uid)
-    );
+    const isAdmin = currentUser.email === 'sg7899976@gmail.com' || currentUser.email === 'gazisahidhosen76@gmail.com' || currentUser.role === 'leader';
+    
+    const q = isAdmin 
+      ? query(collection(db, 'reports'))
+      : query(collection(db, 'reports'), where('developerUid', '==', currentUser.uid));
+
     const unsubscribe = safeOnSnapshot(q, (snapshot) => {
       const reportsList: Report[] = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        reportsList.push({
-          id: doc.id,
-          appId: data.appId,
-          appName: data.appName,
-          developerUid: data.developerUid,
-          testerUid: data.testerUid,
-          testerName: data.testerName,
-          testerPhoto: data.testerPhoto,
-          feedback: data.feedback,
-          bugReport: data.bugReport,
-          suggestions: data.suggestions,
-          screenshots: data.screenshots || [],
-          status: data.status,
-          createdAt: data.createdAt,
-        });
+        // Allow if user is admin OR if they are the developer of the app
+        if (isAdmin || data.developerUid === currentUser.uid) {
+          reportsList.push({
+            id: doc.id,
+            appId: data.appId,
+            appName: data.appName,
+            developerUid: data.developerUid,
+            testerUid: data.testerUid,
+            testerName: data.testerName,
+            testerPhoto: data.testerPhoto,
+            feedback: data.feedback,
+            bugReport: data.bugReport,
+            suggestions: data.suggestions,
+            screenshots: data.screenshots || [],
+            status: data.status,
+            createdAt: data.createdAt,
+          });
+        }
       });
       setReceivedReports(reportsList);
     });
 
     return () => unsubscribe();
+  }, [currentUser.uid, currentUser.email, currentUser.role]);
+
+  // Fetch reviews submitted by me to other apps
+  useEffect(() => {
+    const q = query(
+      collection(db, 'reports'),
+      where('testerUid', '==', currentUser.uid)
+    );
+    const unsubscribe = safeOnSnapshot(q, (snapshot) => {
+      const appIds = new Set<string>();
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.appId) {
+          appIds.add(data.appId);
+        }
+      });
+      setSubmittedReportAppIds(appIds);
+    });
+
+    return () => unsubscribe();
   }, [currentUser.uid]);
+
+  // Multi screenshot compressor for complaints
+  const handleComplaintScreenshotUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    (Array.from(files) as File[]).forEach((file: File) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new window.Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 2000; // Large width to preserve vertical phone screenshot clarity (around 1080px wide)
+          const MAX_HEIGHT = 2800; // Large height to avoid extreme downscaling
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.93);
+          setComplaintScreenshots((prev) => [...prev, dataUrl].slice(0, 3)); // Limit to max 3 screenshots
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Submit Complaint Report against user to Administrator
+  const handleSubmitComplaint = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportTargetUser.trim() || !complaintText.trim()) {
+      alert("Please provide the target user info and complaint description.");
+      return;
+    }
+
+    setSubmittingComplaint(true);
+    setComplaintSuccess(false);
+
+    try {
+      const complaintId = `comp_${Date.now()}_${currentUser.uid}`;
+      const complaintData = {
+        id: complaintId,
+        reporterUid: currentUser.uid,
+        reporterName: currentUser.displayName || currentUser.email,
+        reporterEmail: currentUser.email,
+        targetUser: reportTargetUser.trim(),
+        complaintText: complaintText.trim(),
+        screenshots: complaintScreenshots,
+        createdAt: new Date().toISOString(),
+        status: 'Pending'
+      };
+
+      await safeSetDoc(doc(db, 'complaints', complaintId), complaintData);
+
+      setReportTargetUser('');
+      setComplaintText('');
+      setComplaintScreenshots([]);
+      setComplaintSuccess(true);
+      alert("Your complaint report has been successfully submitted to the Administrator.");
+      setTimeout(() => setComplaintSuccess(false), 3000);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to submit complaint.");
+    } finally {
+      setSubmittingComplaint(false);
+    }
+  };
 
   // Save profile changes
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -332,11 +454,28 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
     }
   };
 
+  // Developer deletes report permanently (safe and non-blocking in iframe)
+  const handleDeleteReport = async (reportId: string) => {
+    setDeletingReportId(reportId);
+    try {
+      await safeDeleteDoc(doc(db, 'reports', reportId));
+    } catch (err) {
+      console.error("Failed to delete report: ", err);
+    } finally {
+      setDeletingReportId(null);
+    }
+  };
+
+  const isAdmin = currentUser.email === 'sg7899976@gmail.com' || currentUser.email === 'gazisahidhosen76@gmail.com' || currentUser.role === 'leader';
+  const visibleReports = isAdmin 
+    ? receivedReports 
+    : receivedReports.filter(report => report.developerUid === currentUser.uid);
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 bg-[#0F172A] min-h-[calc(100vh-4rem)]" id="dashboard_container">
       
       {/* Tab Switcher Grid */}
-      <div className="grid grid-cols-2 gap-3 sm:flex sm:space-x-3 border-b border-slate-700/50 pb-5" id="dashboard_header_tabs">
+      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:space-x-3 border-b border-slate-700/50 pb-5" id="dashboard_header_tabs">
         <button
           onClick={() => setActiveSubTab('profile')}
           className={`flex items-center justify-center space-x-2 rounded-xl py-2.5 px-4 text-xs font-bold transition-all sm:text-sm ${
@@ -373,7 +512,20 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
           id="dashboard_subtab_receive"
         >
           <Inbox className="h-4 w-4" />
-          <span>Test Requests ({otherApps.length})</span>
+          <span>Test Requests ({otherApps.filter(app => !submittedReportAppIds.has(app.id)).length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('daily_check')}
+          className={`flex items-center justify-center space-x-2 rounded-xl py-2.5 px-4 text-xs font-bold transition-all sm:text-sm ${
+            activeSubTab === 'daily_check'
+              ? 'bg-emerald-600/15 text-emerald-400 border border-emerald-500/35 shadow-lg shadow-emerald-500/5'
+              : 'bg-[#1E293B]/60 border border-slate-700/40 text-slate-400 hover:bg-[#1E293B] hover:text-white'
+          }`}
+          id="dashboard_subtab_daily_check"
+        >
+          <Calendar className="h-4 w-4" />
+          <span>daily check</span>
         </button>
 
         <button
@@ -386,7 +538,20 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
           id="dashboard_subtab_reviews"
         >
           <MessageSquareCode className="h-4 w-4" />
-          <span>Review Logs ({receivedReports.length})</span>
+          <span>Review Logs ({visibleReports.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('report_user')}
+          className={`flex items-center justify-center space-x-2 rounded-xl py-2.5 px-4 text-xs font-bold transition-all sm:text-sm ${
+            activeSubTab === 'report_user'
+              ? 'bg-rose-600/15 text-rose-400 border border-rose-500/35 shadow-lg shadow-rose-500/5'
+              : 'bg-[#1E293B]/60 border border-slate-700/40 text-slate-400 hover:bg-[#1E293B] hover:text-white'
+          }`}
+          id="dashboard_subtab_report_user"
+        >
+          <ShieldAlert className="h-4 w-4" />
+          <span>Report</span>
         </button>
       </div>
 
@@ -828,15 +993,15 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
               )}
             </AnimatePresence>
 
-            {otherApps.length === 0 ? (
+            {otherApps.filter(app => !submittedReportAppIds.has(app.id)).length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-slate-800 bg-[#1E293B] text-center text-slate-400">
                 <Inbox className="h-12 w-12 text-slate-600 mb-3 animate-pulse" />
                 <h4 className="text-base font-bold text-white">No Testing Requests Available</h4>
-                <p className="text-xs mt-1 max-w-sm leading-relaxed">Either no developer has submitted an app yet, or they only submitted requests which you authored yourself.</p>
+                <p className="text-xs mt-1 max-w-sm leading-relaxed">Either no developer has submitted an app yet, or you have completed all outstanding test requests.</p>
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2" id="receive_grid">
-                {otherApps.map((app) => {
+                {otherApps.filter(app => !submittedReportAppIds.has(app.id)).map((app) => {
                   const isExpanded = expandedAppId === app.id;
                   return (
                     <motion.div
@@ -936,10 +1101,209 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
           </div>
         )}
 
+        {/* daily check Screen */}
+        {activeSubTab === 'daily_check' && (
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-6 text-left animate-fadeIn"
+            id="daily_check_panel"
+          >
+            <div className="bg-slate-900/40 border border-slate-800 p-5 rounded-2xl">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-emerald-400" />
+                <span>Daily Check: Direct Android Links</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                Click any link below to join as a tester and open the Android application directly on the Google Play Store.
+              </p>
+            </div>
+
+            {(() => {
+              const dailyCheckApps = otherApps.filter((app) => {
+                const createdTime = new Date(app.createdAt).getTime();
+                const diffTime = Date.now() - createdTime;
+                const diffDays = diffTime / (1000 * 60 * 60 * 24);
+                return diffDays <= 14;
+              });
+
+              if (dailyCheckApps.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-slate-800 bg-[#1E293B] text-center text-slate-400">
+                    <CheckCircle2 className="h-12 w-12 text-emerald-500 mb-3 animate-pulse" />
+                    <h4 className="text-base font-bold text-white">All Caught Up!</h4>
+                    <p className="text-xs mt-1 max-w-sm leading-relaxed">No active app download links are available right now. Please check back later!</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" id="daily_check_grid">
+                  {dailyCheckApps.map((app) => {
+                    const createdTime = new Date(app.createdAt).getTime();
+                    const diffTime = (createdTime + 14 * 24 * 60 * 60 * 1000) - Date.now();
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    const daysRemaining = diffDays > 0 ? diffDays : 0;
+
+                    return (
+                      <div key={app.id} className="rounded-2xl border border-slate-850 bg-[#1E293B] p-5 flex flex-col justify-between hover:border-emerald-500/40 transition-all shadow-xl hover:shadow-emerald-500/5 group">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-3.5">
+                              <img src={app.appIcon} alt={app.appName} className="h-12 w-12 rounded-xl object-cover border border-slate-800 shadow-md group-hover:scale-105 transition-transform" />
+                              <div>
+                                <h4 className="text-sm font-bold text-white tracking-wide leading-tight group-hover:text-emerald-400 transition-colors">{app.appName}</h4>
+                                <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider block mt-0.5">DEV: {app.developerEmail ? app.developerEmail.split('@')[0] : 'Unknown'}</span>
+                              </div>
+                            </div>
+                            <span className={`px-2 py-1 rounded text-[9px] font-mono font-bold tracking-wider uppercase border ${
+                              daysRemaining <= 3 
+                                ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' 
+                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                            }`}>
+                              {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} left
+                            </span>
+                          </div>
+                          <div className="text-[10px] bg-slate-900/50 text-slate-400 rounded-lg p-2.5 border border-slate-800/50 leading-relaxed font-mono truncate">
+                            <span>Link: </span>
+                            <span className="text-emerald-400 font-bold">{app.joinAndroidLink}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 pt-3.5 border-t border-slate-800/80 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500 font-mono">Posted: {new Date(app.createdAt).toLocaleDateString()}</span>
+                          <a
+                            href={app.joinAndroidLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/10 hover:shadow-emerald-500/20 active:scale-[0.98] transition-all"
+                          >
+                            <span>JOIN ON ANDROID</span>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </motion.div>
+        )}
+
+        {/* Report User (Complaint) Screen */}
+        {activeSubTab === 'report_user' && (
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-2xl mx-auto text-left animate-fadeIn"
+            id="report_user_panel"
+          >
+            <div className="rounded-2xl border border-slate-800 bg-[#1E293B] p-6 shadow-xl space-y-6">
+              <div className="border-b border-slate-800 pb-4">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <ShieldAlert className="h-5 w-5 text-rose-500" />
+                  <span>Report User / General Complaint</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                  Submit a formal complaint against a community member. Please provide their Name, Email address, or User ID, a clear explanation of what occurred, and optional screenshots to support your report.
+                </p>
+              </div>
+
+              {complaintSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl p-4 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  <span>Your complaint has been successfully delivered to the admin desk.</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmitComplaint} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
+                    Target User Information <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Enter User's Name, Email address, or User ID (any information known)"
+                    value={reportTargetUser}
+                    onChange={(e) => setReportTargetUser(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1.5">Please provide any details you have (Name, Email, or UID) so our moderation team can identify the account.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
+                    What Happened? (Detailed Description) <span className="text-rose-500">*</span>
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    placeholder="Provide a detailed explanation of the incident, issue, or behavior that occurred..."
+                    value={complaintText}
+                    onChange={(e) => setComplaintText(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-xl p-3.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-rose-500 transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1.5">
+                    Supporting Screenshots / Evidence (Optional, Max 3)
+                  </label>
+                  <div className="flex items-center gap-3 p-4 bg-slate-900 rounded-xl border border-slate-850">
+                    <Image className="h-5 w-5 text-slate-400" />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleComplaintScreenshotUpload}
+                      className="text-xs text-slate-400 cursor-pointer"
+                    />
+                  </div>
+                  {complaintScreenshots.length > 0 && (
+                    <div className="flex gap-2.5 mt-3">
+                      {complaintScreenshots.map((src, idx) => (
+                        <div key={idx} className="relative h-16 w-20 rounded-lg bg-slate-800 border border-slate-700 overflow-hidden">
+                          <img src={src} alt="complaint screenshot" className="h-full w-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setComplaintScreenshots((prev) => prev.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 text-white bg-black/75 h-4 w-4 rounded-full flex items-center justify-center text-[8px] hover:bg-black transition-colors"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-slate-800/80 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={submittingComplaint}
+                    className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow-lg shadow-rose-600/10 hover:shadow-rose-500/20 active:scale-[0.98] transition-all"
+                  >
+                    {submittingComplaint ? (
+                      <span>SUBMITTING REPORT...</span>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4" />
+                        <span>SUBMIT COMPLAINT REPORT</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </motion.div>
+        )}
+
         {/* Review Comments Screen */}
         {activeSubTab === 'reviews' && (
           <div className="space-y-6" id="developer_reviews_panel">
-            {receivedReports.length === 0 ? (
+            {visibleReports.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 rounded-2xl border border-slate-800 bg-[#1E293B] text-center text-slate-400">
                 <MessageSquareCode className="h-12 w-12 text-slate-600 mb-3" />
                 <h4 className="text-base font-bold text-white">No Reviews Received</h4>
@@ -947,7 +1311,7 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
               </div>
             ) : (
               <div className="space-y-4" id="reviews_list">
-                {receivedReports.map((report) => (
+                {visibleReports.map((report) => (
                   <div key={report.id} className="rounded-2xl border border-slate-800 bg-[#1E293B] p-5 text-left flex flex-col md:flex-row gap-5">
                     {/* Tester Info column */}
                     <div className="md:w-1/4 shrink-0 border-b md:border-b-0 md:border-r border-slate-800 pb-4 md:pb-0 md:pr-5 flex md:flex-col items-center md:items-start text-center md:text-left gap-3">
@@ -996,6 +1360,20 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
                               </button>
                             </div>
                           )}
+
+                          <button
+                            onClick={() => {
+                              if (window.confirm("Are you sure you want to permanently delete this feedback report?")) {
+                                handleDeleteReport(report.id);
+                              }
+                            }}
+                            disabled={deletingReportId === report.id}
+                            className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 rounded text-[10px] font-bold transition-all disabled:opacity-50"
+                            title="Delete report permanently from database"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>{deletingReportId === report.id ? "Deleting..." : "Delete"}</span>
+                          </button>
                         </div>
                       </div>
 
@@ -1028,13 +1406,18 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
                       {/* Optional Screenshots Row with lightboxes */}
                       {report.screenshots && report.screenshots.length > 0 && (
                         <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Submitted screenshots:</span>
+                          <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Submitted screenshots (Click to zoom/panning):</span>
                           <div className="flex gap-2.5 mt-2.5">
                             {report.screenshots.map((src, i) => (
-                              <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="relative group overflow-hidden rounded-lg border border-slate-800 hover:border-blue-500 transition-colors">
+                              <button 
+                                key={i} 
+                                type="button"
+                                onClick={() => setLightboxImage(src)}
+                                className="relative group overflow-hidden rounded-lg border border-slate-800 hover:border-blue-500 transition-colors focus:outline-none"
+                              >
                                 <img src={src} alt="Feedback Screenshot" className="h-16 w-24 object-cover" />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-mono transition-opacity">Fullscreen</div>
-                              </a>
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[10px] text-white font-mono transition-opacity">Zoom In</div>
+                              </button>
                             ))}
                           </div>
                         </div>
@@ -1049,6 +1432,16 @@ export default function Dashboard({ currentUser, onRefreshUser }: DashboardProps
         )}
 
       </div>
+
+      <AnimatePresence>
+        {lightboxImage && (
+          <ImageLightbox 
+            src={lightboxImage} 
+            alt="Review Log Screenshot Zoom" 
+            onClose={() => setLightboxImage(null)} 
+          />
+        )}
+      </AnimatePresence>
 
     </div>
   );
